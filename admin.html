@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport"content="width=device-width,initial-scale=1">
+<title>Admin Panel — MyWapBlog v2</title>
+<style>
+body{font-family:Arial;padding:14px;background:#f7f1e1}
+.card{background:#fff;padding:12px;border-radius:8px;margin:10px 0}
+input, textarea, select { width:100%;padding:8px;margin:6px 0 }
+.btn{padding:8px 11px;border-radius:6px;background:#d8c5aa;border:1px solid #bba98f;cursor:pointer}
+.post-row{display:flex;justify-content:space-between;gap:8px;padding:8px;border-bottom:1px dashed #eee}
+.small{font-size:13px;color:#666}
+</style>
+</head>
+<body>
+<a href="index.html" class="btn">← Home</a>
+
+<div id="authCard" class="card">
+  <h3>Admin Login</h3>
+  <input id="email" placeholder="email">
+  <input id="password" placeholder="password" type="password">
+  <div style="display:flex;gap:8px">
+    <button id="btn-login" class="btn">Login</button>
+    <button id="btn-register" class="btn">Register (one-time)</button>
+    <button id="btn-logout" class="btn" style="display:none">Logout</button>
+  </div>
+  <div id="authInfo" class="small"></div>
+</div>
+
+<div id="editorCard" class="card" style="display:none">
+  <h3 id="editorTitle">Buat Post Baru</h3>
+  <input id="title" placeholder="Judul">
+  <textarea id="body" rows="6" placeholder="Isi post (plain text)"></textarea>
+  <input id="category" placeholder="Kategori (Tema/Audio/Info)">
+  <label>File (mp3/zip)</label><input type="file" id="file">
+  <label>Thumbnail (jpg/png)</label><input type="file" id="thumb">
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button id="btn-save" class="btn">Save Draft</button>
+    <button id="btn-publish" class="btn">Publish</button>
+    <button id="btn-cancel" class="btn">Cancel Edit</button>
+  </div>
+</div>
+
+<div id="listCard" class="card" style="display:none">
+  <h3>Posts</h3>
+  <div id="postsList">Loading…</div>
+</div>
+
+<div id="dashCard" class="card" style="display:none">
+  <h3>Dashboard</h3>
+  <div id="stats">Loading stats…</div>
+</div>
+
+<script type="module">
+import app, { signIn, signOutNow, registerUser, onAuth, uploadFileInput, getDashboardStats, getPostById, createPost, updatePost, deletePost, deleteStorageByUrl } from './app.js';
+import { collection, getDocs, orderBy, query } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+const emailEl = document.getElementById('email');
+const passEl = document.getElementById('password');
+const btnLogin = document.getElementById('btn-login');
+const btnRegister = document.getElementById('btn-register');
+const btnLogout = document.getElementById('btn-logout');
+const authInfo = document.getElementById('authInfo');
+
+const editorCard = document.getElementById('editorCard');
+const postsList = document.getElementById('postsList');
+const dashCard = document.getElementById('dashCard');
+
+let editId = null;
+
+btnLogin.addEventListener('click', async ()=>{
+  const e = emailEl.value.trim(), p = passEl.value.trim();
+  if(!e||!p) return alert('Isi email & password');
+  try{ await signIn(e,p); } catch(err){ alert('Login gagal: '+err.message); }
+});
+btnRegister.addEventListener('click', async ()=>{
+  const e = emailEl.value.trim(), p = passEl.value.trim();
+  if(!e||!p) return alert('Isi email & password');
+  try{ await registerUser(e,p); alert('Akun dibuat — hapus tombol register atau disable setelah membuat admin.'); } catch(err){ alert('Register gagal: '+err.message); }
+});
+btnLogout.addEventListener('click', async ()=>{ await signOutNow(); });
+
+onAuth(user=>{
+  if(user){
+    authInfo.textContent = 'Logged in: ' + (user.email || user.uid);
+    btnLogout.style.display = 'inline-block';
+    btnLogin.style.display = 'none'; btnRegister.style.display='none';
+    editorCard.style.display = 'block'; document.getElementById('listCard').style.display='block'; dashCard.style.display='block';
+    loadPostsList();
+    loadStats();
+  }else{
+    authInfo.textContent = 'Not logged in';
+    btnLogout.style.display = 'none';
+    btnLogin.style.display = 'inline-block'; btnRegister.style.display='inline-block';
+    editorCard.style.display = 'none'; document.getElementById('listCard').style.display='none'; dashCard.style.display='none';
+  }
+});
+
+// publish / save handlers
+document.getElementById('btn-publish').addEventListener('click', ()=> save(true));
+document.getElementById('btn-save').addEventListener('click', ()=> save(false));
+document.getElementById('btn-cancel').addEventListener('click', ()=> { editId=null; resetForm(); document.getElementById('editorTitle').innerText='Buat Post Baru'; });
+
+async function save(publish=false){
+  const t = document.getElementById('title').value.trim();
+  const b = document.getElementById('body').value.trim();
+  const c = document.getElementById('category').value.trim() || 'Uncategorized';
+  if(!t||!b) return alert('Judul & isi wajib');
+
+  // upload files
+  const fileInput = document.getElementById('file');
+  const thumbInput = document.getElementById('thumb');
+  let fileUrl = '', thumbUrl = '';
+  if(fileInput.files && fileInput.files[0]) fileUrl = await app.uploadFileInput(fileInput.files[0] ? fileInput.files[0] : null);
+  if(thumbInput.files && thumbInput.files[0]) thumbUrl = await app.uploadFileInput(thumbInput.files[0] ? thumbInput.files[0] : null);
+
+  try{
+    if(editId){
+      // if new files not uploaded, avoid overwriting urls; better to fetch existing and merge
+      const existing = await getPostById(editId);
+      const payload = { title: t, body: b, category: c, published: publish };
+      if(fileUrl) payload.downloadUrl = fileUrl; else if(existing && existing.data.downloadUrl) payload.downloadUrl = existing.data.downloadUrl;
+      if(thumbUrl) payload.thumbnailUrl = thumbUrl; else if(existing && existing.data.thumbnailUrl) payload.thumbnailUrl = existing.data.thumbnailUrl;
+      await updatePost(editId, payload);
+      alert('Post updated');
+      editId = null;
+    } else {
+      await createPost({ title: t, body: b, category: c, fileUrl, thumbnailUrl: thumbUrl, published: publish });
+      alert('Post created');
+    }
+    resetForm(); loadPostsList(); loadStats();
+  }catch(err){ console.error(err); alert('Error save: '+err.message); }
+}
+
+function resetForm(){ document.getElementById('title').value=''; document.getElementById('body').value=''; document.getElementById('category').value=''; document.getElementById('file').value=''; document.getElementById('thumb').value=''; }
+
+// load posts list
+async function loadPostsList(){
+  const snap = await getDocs(query(collection(app.db,'posts'), orderBy('createdAt','desc')));
+  postsList.innerHTML = '';
+  snap.forEach(doc=>{
+    const d = doc.data();
+    const row = document.createElement('div');
+    row.className = 'post-row';
+    row.innerHTML = `<div style="flex:1"><strong>${d.title||'(no title)'}</strong><div class="small">${d.category} • ${d.published?'<span style="color:green">Published</span>':'Draft'} • views:${d.views||0}</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn" onclick="editPost('${doc.id}')">Edit</button>
+        <button class="btn" onclick="togglePublish('${doc.id}', ${d.published? 'false':'true'})">${d.published? 'Unpublish':'Publish'}</button>
+        <button class="btn" onclick="removePost('${doc.id}')">Delete</button>
+      </div>`;
+    postsList.appendChild(row);
+  });
+}
+
+// expose functions to window for buttons
+window.editPost = async function(id){
+  const r = await getPostById(id);
+  if(!r) return alert('Not found');
+  const d = r.data;
+  document.getElementById('title').value = d.title || '';
+  document.getElementById('body').value = d.body || '';
+  document.getElementById('category').value = d.category || '';
+  document.getElementById('editorTitle').innerText = 'Edit Post';
+  editId = id;
+  window.scrollTo({top:0, behavior:'smooth'});
+};
+
+window.togglePublish = async function(id, newState){
+  try{
+    await updatePost(id, { published: newState });
+    alert('Updated publish state');
+    loadPostsList(); loadStats();
+  } catch(err){ alert('Fail: '+err.message); }
+};
+
+window.removePost = async function(id){
+  if(!confirm('Hapus post?')) return;
+  try{
+    const r = await getPostById(id);
+    if(r && r.data){
+      await deleteStorageByUrl(r.data.downloadUrl);
+      await deleteStorageByUrl(r.data.thumbnailUrl);
+    }
+    await deletePost(id);
+    alert('Deleted');
+    loadPostsList(); loadStats();
+  }catch(err){ alert('Delete err: '+err.message); }
+};
+
+// load dashboard stats
+async function loadStats(){
+  dashCard.style.display = 'block';
+  document.getElementById('stats').innerText = 'Loading...';
+  const s = await getDashboardStats();
+  document.getElementById('stats').innerHTML = `
+    <div>Total Posts: <strong>${s.totalPosts}</strong></div>
+    <div>Total Views: <strong>${s.totalViews}</strong></div>
+    <div>Total Comments: <strong>${s.totalComments}</strong></div>
+  `;
+}
+
+// small wrappers to call internal app functions
+async function createPost(payload){ return await app.createPost(payload); }
+async function updatePost(id, payload){ return await app.updatePost(id, payload); }
+async function deletePost(id){ return await app.deletePost(id); }
+
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport"content="width=device-width,initial-scale=1">
+<title>Post — MyWapBlog v2</title>
+<style>
+body{font-family:Arial;padding:14px;background:#f7f1e1}
+.btn{padding:6px 10px;border-radius:6px;background:#fff;border:1px solid #c7b59b}
+.thumb{width:100%;max-height:300px;object-fit:cover;border-radius:8px;margin:8px 0}
+.comment{background:#fff;padding:8px;border-radius:8px;margin:6px 0}
+.small{font-size:13px;color:#666}
+</style>
+</head>
+<body>
+<a class="btn" href="index.html">← Home</a>
+<div id="post" style="margin-top:12px"></div>
+
+<h3>Komentar</h3>
+<div id="comments">Loading…</div>
+
+<h4>Tulis Komentar</h4>
+<input id="cName" placeholder="Nama" style="width:100%;padding:8px">
+<textarea id="cText" placeholder="Komentar" style="width:100%;padding:8px"></textarea>
+<button class="btn" id="sendComment">Kirim</button>
+
+<script type="module">
+import app, { getPostById, incrementViews, postComment, deletePost, deleteStorageByUrl } from './app.js';
+import { collection, query, orderBy, onSnapshot, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { onAuth } from './app.js';
+
+const id = new URLSearchParams(location.search).get('id');
+const postEl = document.getElementById('post');
+const commentsEl = document.getElementById('comments');
+
+async function load(){
+  const r = await getPostById(id);
+  if(!r){ postEl.innerHTML = '<div>Post tidak ditemukan.</div>'; return; }
+  const d = r.data;
+  postEl.innerHTML = `
+    <h2>${escapeHtml(d.title)}</h2>
+    <div class="small">${escapeHtml(d.category)} • ${d.views || 0} views</div>
+    ${d.thumbnailUrl ? `<img class="thumb" src="${d.thumbnailUrl}">` : ''}
+    <div style="white-space:pre-wrap">${escapeHtml(d.body)}</div>
+    <div style="margin-top:8px">
+      ${d.downloadUrl ? `<a class="btn" href="${d.downloadUrl}" target="_blank">Download</a>` : ''}
+      <a class="btn" href="admin.html?edit=${id}">Edit (admin)</a>
+    </div>
+  `;
+  // increment views
+  incrementViews(id);
+}
+load();
+
+// comments realtime
+const comRef = collection(app.db,'comments', id, 'items');
+const q = query(comRef, orderBy('createdAt','asc'));
+onSnapshot(q, snap=>{
+  if(snap.empty) { commentsEl.innerHTML = '<div class="small">Belum ada komentar</div>'; return; }
+  let html = '';
+  snap.forEach(doc => {
+    const c = doc.data();
+    html += `<div class="comment"><strong>${escapeHtml(c.name)}</strong> <div class="small">${c.createdAt? new Date(c.createdAt.seconds*1000).toLocaleString() : ''}</div><div>${escapeHtml(c.text)}</div></div>`;
+  });
+  commentsEl.innerHTML = html;
+});
+
+// send comment
+document.getElementById('sendComment').addEventListener('click', async ()=>{
+  const name = document.getElementById('cName').value.trim();
+  const text = document.getElementById('cText').value.trim();
+  if(!name || !text) return alert('Isi nama & komentar');
+  await postComment(id, name, text);
+  document.getElementById('cText').value = '';
+});
+
+// admin delete if logged in (button in post area)
+onAuth(user=>{
+  if(user){
+    // show delete button
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn';
+    delBtn.textContent = 'Hapus Post';
+    delBtn.onclick = async ()=>{
+      if(!confirm('Hapus post?')) return;
+      // attempt to remove storage files referenced in post
+      const r = await getPostById(id);
+      if(r && r.data){
+        await deleteStorageByUrl(r.data.downloadUrl);
+        await deleteStorageByUrl(r.data.thumbnailUrl);
+      }
+      await deletePost(id);
+      alert('Post dihapus');
+      location.href = 'index.html';
+    };
+    postEl.appendChild(delBtn);
+  }
+});
+
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g,c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+</script>
+</body>
+</html>
