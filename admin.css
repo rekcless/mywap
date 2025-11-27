@@ -1,0 +1,32 @@
+body {
+  background: #0d0d0d;
+  font-family: Poppins, sans-serif;
+  color: #e6e6e6;
+}
+.admin-box {
+  width: 90%;
+  max-width: 500px;
+  margin: auto;
+  background: #1a1a1a;
+  padding: 20px;
+  margin-top: 20px;
+  border-radius: 10px;
+}
+input, textarea, select {
+  width: 100%;
+  padding: 10px;
+  background: #111;
+  color: white;
+  border: 1px solid #333;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+button {
+  width: 100%;
+  padding: 12px;
+  background: #4db8ff;
+  border-radius: 8px;
+  border: none;
+  font-weight: bold;
+  margin-top: 15px;
+}

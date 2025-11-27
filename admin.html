@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="admin.css">
+<title>Admin Panel</title>
+</head>
+
+<body>
+
+<div class="admin-box">
+  <h2>Register Admin</h2>
+  <input id="regEmail" placeholder="Email">
+  <input id="regPass" type="password" placeholder="Password">
+  <button onclick="registerAdmin()">Register</button>
+</div>
+
+<div class="admin-box">
+  <h2>Login Admin</h2>
+  <input id="logEmail" placeholder="Email">
+  <input id="logPass" type="password" placeholder="Password">
+  <button onclick="loginAdmin()">Login</button>
+</div>
+
+<div id="panel" style="display:none" class="admin-box">
+  <h2>Buat Post</h2>
+  <input id="title" placeholder="Judul">
+  <textarea id="body" placeholder="Isi..."></textarea>
+  <select id="cat">
+    <option>Informasi</option>
+    <option>Audio</option>
+    <option>Artikel</option>
+  </select>
+  <label>Thumbnail</label>
+  <input type="file" id="thumb">
+  <label>File Download</label>
+  <input type="file" id="file">
+
+  <button onclick="publishPost()">Publish</button>
+  <button onclick="logoutAdmin()" style="background:#ff3b3b;margin-top:5px">Logout</button>
+</div>
+
+<script type="module">
+  import { auth, db, storage } from "./firebase.js";
+
+  import {
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    onAuthStateChanged,
+    signOut
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  import {
+    collection, addDoc, Timestamp
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  import {
+    ref, uploadBytes, getDownloadURL
+  } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+  // REGISTER
+  window.registerAdmin = async () => {
+    try {
+      await createUserWithEmailAndPassword(auth, regEmail.value, regPass.value);
+      alert("Admin berhasil didaftarkan!");
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  // LOGIN
+  window.loginAdmin = async () => {
+    try {
+      await signInWithEmailAndPassword(auth, logEmail.value, logPass.value);
+    } catch (e) {
+      alert(e.message);
+    }
+  };
+
+  // AUTH CHANGE
+  onAuthStateChanged(auth, user => {
+    panel.style.display = user ? "block" : "none";
+  });
+
+  // UPLOAD FILE
+  async function uploadFile(input) {
+    if (!input.files[0]) return "";
+    const file = input.files[0];
+    const r = ref(storage, "uploads/" + Date.now() + "-" + file.name);
+    await uploadBytes(r, file);
+    return await getDownloadURL(r);
+  }
+
+  // PUBLISH
+  window.publishPost = async () => {
+    const fileUrl = await uploadFile(file);
+    const thumbUrl = await uploadFile(thumb);
+
+    await addDoc(collection(db, "posts"), {
+      title: title.value,
+      body: body.value,
+      category: cat.value,
+      downloadUrl: fileUrl,
+      thumbnailUrl: thumbUrl,
+      createdAt: Timestamp.now(),
+      views: 0
+    });
+
+    alert("Post published!");
+  };
+
+  window.logoutAdmin = () => signOut(auth);
+</script>
+
+</body>
+</html>
